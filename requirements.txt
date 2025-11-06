@@ -1,0 +1,6 @@
+streamlit
+qrcode
+pandas
+uuid
+gspread
+gspread-dataframe
