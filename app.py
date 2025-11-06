@@ -5,19 +5,19 @@ from gspread_dataframe import set_with_dataframe, get_as_dataframe
 import uuid
 import io
 import qrcode
-import json # Corrected: Import json for parsing the secret
+import json
 
 # --- CONFIGURATION ---
-# IMPORTANT: Use the exact URL you provided
+# IMPORTANT: Your specific Google Sheet URL
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1pNW2z9RrAAJJZOyPJZUQx3QHZ4u1lm0bl2v2Sbl6lvk/edit?gid=0#gid=0"
 
-# --- GOOGLE SHEETS CONNECTION ---
+# --- GOOGLE SHEETS CONNECTION FUNCTIONS ---
 
-@st.cache_resource(ttl=3600)
+# NOTE: Removed @st.cache_resource to prevent UnhashableParamError
 def connect_gspread():
     """Initializes and authenticates the gspread client by parsing the secret string."""
     try:
-        # Access the secret as a raw string
+        # Access the secret as a raw string (the value inside the triple quotes)
         credentials_json_string = st.secrets["gcp_service_account"] 
         
         # Corrected: Convert the raw string into a Python dictionary
@@ -30,16 +30,23 @@ def connect_gspread():
         st.error('Authentication failed: The key "gcp_service_account" was not found in st.secrets.')
         st.stop()
     except Exception as e:
+        # This catches JSON parsing errors and general connection errors
         st.error(f"Authentication failed during JSON load or GSpread connection. Error: {e}")
         st.stop()
 
 @st.cache_data(ttl=5)
-def load_data(gc_client, sheet_url):
+# NOTE: Removed the unhashable 'gc_client' parameter
+def load_data(sheet_url):
     """Loads data from the Google Sheet into a Pandas DataFrame."""
+    
+    # 1. Connect internally (on every run) to avoid caching errors
+    gc_client = connect_gspread()
+    
     try:
         sh = gc_client.open_by_url(sheet_url)
         worksheet = sh.get_worksheet(0)
         df = get_as_dataframe(worksheet, header=0, evaluate_formulas=True)
+        
         # Ensure minimum required columns exist
         if 'Unique ID (UUID)' not in df.columns:
             df['Unique ID (UUID)'] = ''
@@ -57,7 +64,6 @@ def save_data(gc_client, sheet_url, df):
     try:
         sh = gc_client.open_by_url(sheet_url)
         worksheet = sh.get_worksheet(0)
-        # Overwrite the sheet with the entire, updated DataFrame
         set_with_dataframe(worksheet, df) 
         st.success("Database updated successfully! Attendance data is now saved.")
         st.cache_data.clear() # Clear the cache so the next load pulls the fresh data
@@ -77,10 +83,13 @@ def generate_qr_image(data):
 
 # --- MAIN APP EXECUTION ---
 
+# Connect once to get the client object for saving (saving is not cached)
 gc = connect_gspread()
-df_attendees = load_data(gc, SHEET_URL)
 
-st.sidebar.title("QR Code System")
+# Load data using only the hashable SHEET_URL
+df_attendees = load_data(SHEET_URL)
+
+st.sidebar.title("Seminar QR Code System")
 
 # Sidebar for Mode Selection
 mode = st.sidebar.radio(
@@ -92,14 +101,14 @@ if mode == "Single User Generation":
     st.header("👤 Urgent Registration & QR Generation")
     
     with st.form("single_user_form"):
-        st.markdown("Enter details for the new attendee.")
+        st.markdown("Enter details for the new attendee. Data is immediately saved to Google Sheet.")
         new_name = st.text_input("Name")
         new_phone = st.text_input("Phone Number")
         new_email = st.text_input("Email (Optional)")
         submitted = st.form_submit_button("Generate & Save Attendee")
         
         if submitted and new_name and new_phone:
-            # 1. Generate Unique ID
+            # 1. Generate Unique ID (short UUID)
             new_uuid = str(uuid.uuid4())[:8].upper()
             
             # 2. Prepare new row data
@@ -121,25 +130,13 @@ if mode == "Single User Generation":
             qr_buffer = generate_qr_image(new_uuid)
             st.success(f"Attendee **{new_name}** saved with ID: **{new_uuid}**")
             st.image(qr_buffer, caption=f"QR Code for {new_name}", width=200)
-            
-            st.warning("Please advise the check-in team of the new ID for manual lookup.")
 
 elif mode == "View/Bulk Generation":
     st.header("📋 Master Attendee List & QR Code Preview")
+    st.info("To generate QR codes for existing entries, ensure the 'Unique ID (UUID)' column is filled in the Google Sheet.")
     
-    # Generate QRs for all existing attendees for bulk printing
-    qr_col_data = []
-    for index, row in df_attendees.iterrows():
-        unique_id = row['Unique ID (UUID)']
-        if unique_id:
-            qr_buffer = generate_qr_image(unique_id)
-            qr_col_data.append(qr_buffer)
-        else:
-            qr_col_data.append(None)
-
-    df_display = df_attendees.copy()
-    # Note: Streamlit DataFrames struggle with image columns; for simplicity, we display the data here.
-    st.dataframe(df_display, use_container_width=True)
+    # Display the data frame
+    st.dataframe(df_attendees, use_container_width=True)
     
     # Download button for printing QR codes later (using the Google Sheet method)
     csv_export = df_attendees.to_csv(index=False).encode('utf-8')
