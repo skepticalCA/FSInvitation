@@ -58,7 +58,7 @@ def generate_qr_image(data):
     return buffer
 
 # --- MAIN APP ---
-SHEET_URL = "PASTE_YOUR_GOOGLE_SHEET_URL_HERE" # <<< IMPORTANT: UPDATE THIS
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1pNW2z9RrAAJJZOyPJZUQx3QHZ4u1lm0bl2v2Sbl6lvk/edit?gid=0#gid=0" # <<< IMPORTANT: UPDATE THIS
 
 gc = connect_gspread()
 if gc is None:
