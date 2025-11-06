@@ -4,3 +4,4 @@ pandas
 uuid
 gspread
 gspread-dataframe
+json
